@@ -418,6 +418,8 @@ extension ModernBert {
     case .id(let modelId, _):
       do {
         return try await loadModelBundle(from: modelId)
+      } catch let cancellationError as CancellationError {
+        throw cancellationError
       } catch {
         // answerdotai/ModernBERT-base requires "model." weight prefix.
         return try await loadModelBundle(from: modelId, loadConfig: .addWeightKeyPrefix("model."))
@@ -425,6 +427,8 @@ extension ModernBert {
     case .folder(let url, _):
       do {
         return try await loadModelBundle(from: url)
+      } catch let cancellationError as CancellationError {
+        throw cancellationError
       } catch {
         return try await loadModelBundle(from: url, loadConfig: .addWeightKeyPrefix("model."))
       }
@@ -440,12 +444,16 @@ extension Roberta {
     case .id(let modelId, _):
       do {
         return try await loadModelBundle(from: modelId)
+      } catch let cancellationError as CancellationError {
+        throw cancellationError
       } catch {
         return try await loadModelBundle(from: modelId, loadConfig: .addWeightKeyPrefix("roberta."))
       }
     case .folder(let url, _):
       do {
         return try await loadModelBundle(from: url)
+      } catch let cancellationError as CancellationError {
+        throw cancellationError
       } catch {
         return try await loadModelBundle(from: url, loadConfig: .addWeightKeyPrefix("roberta."))
       }
@@ -461,12 +469,16 @@ extension XLMRoberta {
     case .id(let modelId, _):
       do {
         return try await loadModelBundle(from: modelId)
+      } catch let cancellationError as CancellationError {
+        throw cancellationError
       } catch {
         return try await loadModelBundle(from: modelId, loadConfig: .addWeightKeyPrefix("roberta."))
       }
     case .folder(let url, _):
       do {
         return try await loadModelBundle(from: url)
+      } catch let cancellationError as CancellationError {
+        throw cancellationError
       } catch {
         return try await loadModelBundle(from: url, loadConfig: .addWeightKeyPrefix("roberta."))
       }
