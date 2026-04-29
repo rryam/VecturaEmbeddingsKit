@@ -5,6 +5,6 @@ import Testing
 struct VecturaEmbeddingsKitTests {
   @Test("Exposes package namespace")
   func packageName() {
-    #expect(VecturaEmbeddingsKit.name == "VecturaEmbeddingsKit")
+    #expect(VecturaEmbeddingsKitInfo.name == "VecturaEmbeddingsKit")
   }
 }
