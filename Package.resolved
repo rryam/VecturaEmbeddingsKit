@@ -1,5 +1,5 @@
 {
-  "originHash" : "c1ffbf528be290723d1e7ce40d0f7677c5b7699efe3de4f7ca02c5f42e2ebe2a",
+  "originHash" : "87f6a3a2e06a5f6b4494dd2161473e80581b6c6ff4f88f34f25e133eeb8e8cd5",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -132,8 +132,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/rryam/VecturaKit.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "5fed66f3700bee561326e719250aa01c49fc53d5"
+        "revision" : "5fed66f3700bee561326e719250aa01c49fc53d5",
+        "version" : "5.3.0"
       }
     },
     {

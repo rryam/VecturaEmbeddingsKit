@@ -28,8 +28,8 @@ Add both packages to your `Package.swift`:
 
 ```swift
 dependencies: [
-  .package(url: "https://github.com/rryam/VecturaKit.git", branch: "main"),
-  .package(url: "https://github.com/rryam/VecturaEmbeddingsKit.git", branch: "main"),
+  .package(url: "https://github.com/rryam/VecturaKit.git", from: "5.3.0"),
+  .package(url: "https://github.com/rryam/VecturaEmbeddingsKit.git", from: "1.0.0"),
 ]
 ```
 

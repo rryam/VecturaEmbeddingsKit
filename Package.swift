@@ -19,7 +19,7 @@ let package = Package(
     ),
   ],
   dependencies: [
-    .package(url: "https://github.com/rryam/VecturaKit.git", branch: "main"),
+    .package(url: "https://github.com/rryam/VecturaKit.git", from: "5.3.0"),
     .package(url: "https://github.com/jkrukowski/swift-embeddings.git", from: "0.0.26"),
   ],
   targets: [
