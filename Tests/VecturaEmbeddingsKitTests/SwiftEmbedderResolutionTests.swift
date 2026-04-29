@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import VecturaEmbeddingsKit
 
@@ -72,6 +73,20 @@ struct SwiftEmbedderResolutionTests {
     let source = VecturaModelSource.id("FacebookAI/roberta-base", type: .xlmRoberta)
     let family = SwiftEmbedder.resolveModelFamily(for: source)
     #expect(family == .xlmRoberta)
+  }
+
+  @Test("Folder inference uses only the model directory name")
+  func folderInferenceUsesModelDirectoryName() {
+    let source = VecturaModelSource.folder(URL(filePath: "/Users/roberta/models/bert-model"))
+    let family = SwiftEmbedder.resolveModelFamily(for: source)
+    #expect(family == .bert)
+  }
+
+  @Test("Folder inference still detects family from model directory")
+  func folderInferenceDetectsModelDirectory() {
+    let source = VecturaModelSource.folder(URL(filePath: "/tmp/models/FacebookAI/roberta-base"))
+    let family = SwiftEmbedder.resolveModelFamily(for: source)
+    #expect(family == .roberta)
   }
 
   @Test("Unknown models default to BERT family")

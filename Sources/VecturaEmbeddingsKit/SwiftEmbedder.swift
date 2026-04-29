@@ -70,7 +70,7 @@ public actor SwiftEmbedder {
       }
     }
 
-    let modelId = source.description.lowercased()
+    let modelId = inferredModelIdentifier(for: source).lowercased()
     if modelId.contains("minishlab") ||
         modelId.contains("potion") ||
         modelId.contains("model2vec") ||
@@ -101,6 +101,15 @@ public actor SwiftEmbedder {
     }
 
     return .bert
+  }
+
+  static func inferredModelIdentifier(for source: VecturaModelSource) -> String {
+    switch source {
+    case .id(let id, _):
+      id
+    case .folder(let url, _):
+      url.lastPathComponent
+    }
   }
 
   static func resolvedStaticEmbeddingDimension(
@@ -354,7 +363,24 @@ extension Bert {
         }
       }
     case .folder(let url, _):
-      return try await loadModelBundle(from: url)
+      do {
+        return try await loadModelBundle(from: url)
+      } catch let cancellationError as CancellationError {
+        throw cancellationError
+      } catch {
+        let originalError = error
+        guard isKeyMappingError(originalError) else {
+          throw originalError
+        }
+
+        do {
+          return try await loadModelBundle(from: url, loadConfig: .googleBert)
+        } catch let cancellationError as CancellationError {
+          throw cancellationError
+        } catch {
+          throw originalError
+        }
+      }
     }
   }
 
