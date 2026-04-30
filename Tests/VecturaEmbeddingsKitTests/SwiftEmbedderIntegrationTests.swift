@@ -48,8 +48,11 @@ struct SwiftEmbedderIntegrationTests {
     let results = try await vectura.search(query: "quick jumping animals")
     #expect(results.count >= 2)
 
-    let downloadedModelRoot = tempRoot
-      .appending(path: "models--\(VecturaModelSource.defaultModelId.replacingOccurrences(of: "/", with: "--"))")
+    let downloadedModelRoot = VecturaModelSource.defaultModelId
+      .split(separator: "/")
+      .reduce(tempRoot.appending(path: "models")) { partialResult, pathComponent in
+        partialResult.appending(path: String(pathComponent))
+      }
     #expect(
       FileManager.default.fileExists(atPath: downloadedModelRoot.path(percentEncoded: false)),
       "Expected downloaded model cache under \(downloadedModelRoot.path())"
