@@ -1,6 +1,7 @@
 import CoreML
 import Embeddings
 import Foundation
+import Hub
 import VecturaKit
 
 /// An embedder implementation using swift-embeddings library
@@ -16,8 +17,19 @@ public actor SwiftEmbedder {
     /// Values less than 1 are rejected with `VecturaError.invalidInput`.
     public var staticEmbeddingsTruncateDimension: Int?
 
-    public init(staticEmbeddingsTruncateDimension: Int? = nil) {
+    /// Optional cache directory for downloaded Hugging Face model snapshots.
+    ///
+    /// When set and `modelSource` is `.id(...)`, the model is downloaded into this directory and
+    /// then loaded from the resolved local folder instead of relying on the upstream default
+    /// `~/Documents/huggingface` cache location.
+    public var cacheDirectory: URL?
+
+    public init(
+      staticEmbeddingsTruncateDimension: Int? = nil,
+      cacheDirectory: URL? = nil
+    ) {
       self.staticEmbeddingsTruncateDimension = staticEmbeddingsTruncateDimension
+      self.cacheDirectory = cacheDirectory
     }
   }
 
@@ -315,22 +327,70 @@ extension SwiftEmbedder: VecturaEmbedder {
       return
     }
 
-    switch Self.resolveModelFamily(for: modelSource) {
+    let resolvedSource = try await Self.resolveModelSourceForLoading(
+      modelSource,
+      configuration: configuration
+    )
+
+    switch Self.resolveModelFamily(for: resolvedSource) {
     case .model2vec:
-      model2vecModel = try await Model2Vec.loadModelBundle(from: modelSource)
+      model2vecModel = try await Model2Vec.loadModelBundle(from: resolvedSource)
     case .staticEmbeddings:
-      staticEmbeddingsModel = try await StaticEmbeddings.loadModelBundle(from: modelSource)
+      staticEmbeddingsModel = try await StaticEmbeddings.loadModelBundle(from: resolvedSource)
     case .nomicBert:
-      nomicBertModel = try await NomicBert.loadModelBundle(from: modelSource)
+      nomicBertModel = try await NomicBert.loadModelBundle(from: resolvedSource)
     case .modernBert:
-      modernBertModel = try await ModernBert.loadModelBundle(from: modelSource)
+      modernBertModel = try await ModernBert.loadModelBundle(from: resolvedSource)
     case .roberta:
-      robertaModel = try await Roberta.loadModelBundle(from: modelSource)
+      robertaModel = try await Roberta.loadModelBundle(from: resolvedSource)
     case .xlmRoberta:
-      xlmRobertaModel = try await XLMRoberta.loadModelBundle(from: modelSource)
+      xlmRobertaModel = try await XLMRoberta.loadModelBundle(from: resolvedSource)
     case .bert:
-      bertModel = try await Bert.loadModelBundle(from: modelSource)
+      bertModel = try await Bert.loadModelBundle(from: resolvedSource)
     }
+  }
+
+  static func resolveModelSourceForLoading(
+    _ modelSource: VecturaModelSource,
+    configuration: Configuration,
+    downloader: @escaping @Sendable (String, URL) async throws -> URL = { modelId, cacheDirectory in
+      try await downloadModel(from: modelId, cacheDirectory: cacheDirectory)
+    }
+  ) async throws -> VecturaModelSource {
+    guard let cacheDirectory = configuration.cacheDirectory else {
+      return modelSource
+    }
+
+    guard case .id(let modelId, let type) = modelSource else {
+      return modelSource
+    }
+
+    let modelFolder = try await downloader(modelId, cacheDirectory)
+    return .folder(modelFolder, type: type)
+  }
+
+  private static func downloadModel(
+    from modelId: String,
+    cacheDirectory: URL
+  ) async throws -> URL {
+    try FileManager.default.createDirectory(
+      at: cacheDirectory,
+      withIntermediateDirectories: true
+    )
+
+    let hubApi = HubApi(downloadBase: cacheDirectory)
+    return try await hubApi.snapshot(
+      from: Hub.Repo(id: modelId, type: .models),
+      matching: [
+        "*.json",
+        "*.safetensors",
+        "*.py",
+        "tokenizer.model",
+        "sentencepiece*.model",
+        "*.tiktoken",
+        "*.txt",
+      ]
+    )
   }
 }
 
