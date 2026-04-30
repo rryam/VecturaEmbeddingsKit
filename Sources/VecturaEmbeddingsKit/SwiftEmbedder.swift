@@ -366,7 +366,19 @@ extension SwiftEmbedder: VecturaEmbedder {
     }
 
     let modelFolder = try await downloader(modelId, cacheDirectory)
-    return .folder(modelFolder, type: type)
+    return .folder(modelFolder, type: type ?? inferredModelType(for: modelSource))
+  }
+
+  private static func inferredModelType(for source: VecturaModelSource) -> VecturaModelSource.ModelType {
+    switch resolveModelFamily(for: source) {
+    case .bert: .bert
+    case .modernBert: .modernBert
+    case .roberta: .roberta
+    case .xlmRoberta: .xlmRoberta
+    case .model2vec: .model2vec
+    case .staticEmbeddings: .staticEmbeddings
+    case .nomicBert: .nomicBert
+    }
   }
 
   private static func downloadModel(

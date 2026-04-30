@@ -59,6 +59,24 @@ struct SwiftEmbedderResolutionTests {
     }
   }
 
+  @Test("Cached ID source preserves inferred model type")
+  func cachedIDSourcePreservesInferredModelType() async throws {
+    let cacheDirectory = URL(filePath: "/tmp/vectura-cache")
+    let downloadedFolder = cacheDirectory
+      .appending(path: "models--minishlab--potion-base-4M")
+      .appending(path: "snapshots")
+      .appending(path: "abcdef1234567890")
+    let source = VecturaModelSource.id("minishlab/potion-base-4M")
+
+    let resolved = try await SwiftEmbedder.resolveModelSourceForLoading(
+      source,
+      configuration: .init(cacheDirectory: cacheDirectory),
+      downloader: { _, _ in downloadedFolder }
+    )
+
+    #expect(SwiftEmbedder.resolveModelFamily(for: resolved) == .model2vec)
+  }
+
   @Test("Explicit model type overrides heuristics")
   func explicitModelTypeOverridesHeuristics() {
     let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .bert)
