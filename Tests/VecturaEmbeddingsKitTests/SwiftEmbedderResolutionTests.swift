@@ -1,9 +1,81 @@
 import Foundation
 import Testing
 @testable import VecturaEmbeddingsKit
+@testable import VecturaKit
 
 @Suite("SwiftEmbedder Resolution")
 struct SwiftEmbedderResolutionTests {
+  @Test("Model source remains unchanged when cache directory is nil")
+  func modelSourceUnchangedWithoutCacheDirectory() async throws {
+    let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .model2vec)
+    let resolved = try await SwiftEmbedder.resolveModelSourceForLoading(
+      source,
+      configuration: .init(cacheDirectory: nil),
+      downloader: { _, _ in
+        Issue.record("Downloader should not be called when cache directory is nil")
+        return URL(filePath: "/tmp/unused")
+      }
+    )
+    #expect(resolved.description == source.description)
+  }
+
+  @Test("Folder source remains unchanged even when cache directory is set")
+  func folderSourceUnchangedWithCacheDirectory() async throws {
+    let folder = URL(filePath: "/tmp/fake-model")
+    let source = VecturaModelSource.folder(folder, type: .model2vec)
+    let resolved = try await SwiftEmbedder.resolveModelSourceForLoading(
+      source,
+      configuration: .init(cacheDirectory: URL(filePath: "/tmp/cache")),
+      downloader: { _, _ in
+        Issue.record("Downloader should not be called for folder model sources")
+        return URL(filePath: "/tmp/unused")
+      }
+    )
+    #expect(resolved.description == source.description)
+  }
+
+  @Test("ID source resolves to downloaded folder when cache directory is set")
+  func idSourceResolvesToDownloadedFolderWithCacheDirectory() async throws {
+    let cacheDirectory = URL(filePath: "/tmp/vectura-cache")
+    let downloadedFolder = URL(filePath: "/tmp/vectura-cache/models--minishlab--potion-base-4M")
+    let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .model2vec)
+
+    let resolved = try await SwiftEmbedder.resolveModelSourceForLoading(
+      source,
+      configuration: .init(cacheDirectory: cacheDirectory),
+      downloader: { modelId, cacheDirectory in
+        #expect(modelId == "minishlab/potion-base-4M")
+        #expect(cacheDirectory == URL(filePath: "/tmp/vectura-cache"))
+        return downloadedFolder
+      }
+    )
+
+    switch resolved {
+    case .folder(let url, let type):
+      #expect(url == downloadedFolder)
+      #expect(type == .model2vec)
+    case .id:
+      Issue.record("Expected downloaded ID source to resolve to a folder source")
+    }
+  }
+
+  @Test("Cached ID source preserves inferred model type")
+  func cachedIDSourcePreservesInferredModelType() async throws {
+    let cacheDirectory = URL(filePath: "/tmp/vectura-cache")
+    let downloadedFolder = cacheDirectory
+      .appending(path: "models--minishlab--potion-base-4M")
+      .appending(path: "snapshots")
+      .appending(path: "abcdef1234567890")
+    let source = VecturaModelSource.id("minishlab/potion-base-4M")
+
+    let resolved = try await SwiftEmbedder.resolveModelSourceForLoading(
+      source,
+      configuration: .init(cacheDirectory: cacheDirectory),
+      downloader: { _, _ in downloadedFolder }
+    )
+
+    #expect(SwiftEmbedder.resolveModelFamily(for: resolved) == .model2vec)
+  }
 
   @Test("Explicit model type overrides heuristics")
   func explicitModelTypeOverridesHeuristics() {
@@ -125,7 +197,7 @@ struct SwiftEmbedderResolutionTests {
 
   @Test("Static dimension rejects non-positive truncation")
   func staticDimensionRejectsInvalidTruncation() {
-    #expect(throws: (any Error).self) {
+    #expect(throws: VecturaError.self) {
       _ = try SwiftEmbedder.resolvedStaticEmbeddingDimension(
         baseDimension: 384,
         truncateDimension: 0

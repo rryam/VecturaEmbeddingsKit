@@ -91,6 +91,17 @@ let embedder = SwiftEmbedder(
 )
 ```
 
+Download remote model snapshots into a specific cache directory:
+
+```swift
+let embedder = SwiftEmbedder(
+  modelSource: .id("minishlab/potion-base-4M"),
+  configuration: .init(
+    cacheDirectory: URL(filePath: "/tmp/vectura-model-cache")
+  )
+)
+```
+
 Load a local model folder:
 
 ```swift
@@ -140,6 +151,24 @@ let embedder = SwiftEmbedder(
 
 Values less than `1` are rejected with `VecturaError.invalidInput`. Values larger than the model dimension are capped at the model dimension.
 
+## CLI
+
+The package includes `vectura-embeddings-cli` for quick local database checks:
+
+```bash
+swift run vectura-embeddings-cli add "First document" "Second document" --db-name documents
+swift run vectura-embeddings-cli search "semantic search" --db-name documents --threshold 0.7 --num-results 5
+swift run vectura-embeddings-cli mock --db-name qa-db --model-id minishlab/potion-base-4M
+```
+
+Common options include:
+
+- `--db-name`, `-d`: database name
+- `--dimension`, `-v`: vector dimension override, auto-detected by default
+- `--threshold`, `-t`: minimum similarity threshold
+- `--num-results`, `-n`: number of results to return
+- `--model-id`, `-m`: Hugging Face model identifier
+
 ## Migration From VecturaKit
 
 Older `VecturaKit` versions shipped `SwiftEmbedder` directly from the core package:
@@ -177,6 +206,18 @@ swift build
 swift test
 swift build -c release
 swift test -c release
+```
+
+Run the validation executable against a small seeded database:
+
+```bash
+swift run TestEmbeddingsExamples
+```
+
+Run the opt-in model-download integration path:
+
+```bash
+VECTURA_RUN_EMBEDDINGS_INTEGRATION_TESTS=1 swift test --filter SwiftEmbedderIntegrationTests
 ```
 
 When testing this package alongside an unreleased local `VecturaKit` branch:
