@@ -19,9 +19,9 @@ public actor SwiftEmbedder {
 
     /// Optional cache directory for downloaded Hugging Face model snapshots.
     ///
-    /// When set and `modelSource` is `.id(...)`, the model is downloaded into this directory and
-    /// then loaded from the resolved local folder instead of relying on the upstream default
-    /// `~/Documents/huggingface` cache location.
+    /// When `modelSource` is `.id(...)`, the model is downloaded into this directory and then loaded
+    /// from the resolved local folder. When nil, `SwiftEmbedder` uses the upstream default
+    /// `Documents/huggingface` cache location while still coordinating concurrent downloads.
     public var cacheDirectory: URL?
 
     public init(
@@ -140,6 +140,11 @@ public actor SwiftEmbedder {
     }
 
     return min(baseDimension, truncateDimension)
+  }
+
+  static var defaultModelCacheDirectory: URL {
+    let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    return documents.appending(path: "huggingface", directoryHint: .isDirectory)
   }
 
   private func staticEmbeddingsTruncateDimension() throws -> Int? {
@@ -358,14 +363,11 @@ extension SwiftEmbedder: VecturaEmbedder {
       try await downloadModel(from: modelId, cacheDirectory: cacheDirectory)
     }
   ) async throws -> VecturaModelSource {
-    guard let cacheDirectory = configuration.cacheDirectory else {
-      return modelSource
-    }
-
     guard case .id(let modelId, let type) = modelSource else {
       return modelSource
     }
 
+    let cacheDirectory = configuration.cacheDirectory ?? defaultModelCacheDirectory
     let modelFolder = try await modelDownloadCoordinator.download(
       modelId: modelId,
       cacheDirectory: cacheDirectory,

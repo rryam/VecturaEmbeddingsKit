@@ -5,18 +5,31 @@ import Testing
 
 @Suite("SwiftEmbedder Resolution")
 struct SwiftEmbedderResolutionTests {
-  @Test("Model source remains unchanged when cache directory is nil")
-  func modelSourceUnchangedWithoutCacheDirectory() async throws {
+  @Test("ID source resolves through default cache directory when cache directory is nil")
+  func idSourceResolvesThroughDefaultCacheDirectory() async throws {
     let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .model2vec)
+    let downloadedFolder = SwiftEmbedder.defaultModelCacheDirectory
+      .appending(path: "models--minishlab--potion-base-4M")
+      .appending(path: "snapshots")
+      .appending(path: "abcdef1234567890")
+
     let resolved = try await SwiftEmbedder.resolveModelSourceForLoading(
       source,
       configuration: .init(cacheDirectory: nil),
-      downloader: { _, _ in
-        Issue.record("Downloader should not be called when cache directory is nil")
-        return URL(filePath: "/tmp/unused")
+      downloader: { modelId, requestedCacheDirectory in
+        #expect(modelId == "minishlab/potion-base-4M")
+        #expect(requestedCacheDirectory == SwiftEmbedder.defaultModelCacheDirectory)
+        return downloadedFolder
       }
     )
-    #expect(resolved.description == source.description)
+
+    switch resolved {
+    case .folder(let url, let type):
+      #expect(url == downloadedFolder)
+      #expect(type == .model2vec)
+    case .id:
+      Issue.record("Expected downloaded ID source to resolve to a folder source")
+    }
   }
 
   @Test("Folder source remains unchanged even when cache directory is set")
@@ -95,6 +108,50 @@ struct SwiftEmbedderResolutionTests {
             configuration: .init(cacheDirectory: cacheDirectory),
             downloader: { modelId, cacheDirectory in
               try await probe.download(modelId: modelId, cacheDirectory: cacheDirectory)
+            }
+          )
+        }
+      }
+
+      var resolvedSources: [VecturaModelSource] = []
+      for try await resolvedSource in group {
+        resolvedSources.append(resolvedSource)
+      }
+      return resolvedSources
+    }
+
+    let downloadCount = await probe.downloadCount
+    #expect(downloadCount == 1)
+    #expect(resolvedSources.count == 8)
+    for resolvedSource in resolvedSources {
+      switch resolvedSource {
+      case .folder(let url, let type):
+        #expect(url == downloadedFolder)
+        #expect(type == .model2vec)
+      case .id:
+        Issue.record("Expected downloaded ID source to resolve to a folder source")
+      }
+    }
+  }
+
+  @Test("Concurrent default-cache ID source resolutions share in-flight download")
+  func concurrentDefaultCacheIDSourceResolutionsShareInFlightDownload() async throws {
+    let downloadedFolder = SwiftEmbedder.defaultModelCacheDirectory
+      .appending(path: "models--minishlab--potion-base-4M")
+      .appending(path: "snapshots")
+      .appending(path: "abcdef1234567890")
+    let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .model2vec)
+    let probe = DownloadProbe(downloadedFolder: downloadedFolder)
+
+    let resolvedSources = try await withThrowingTaskGroup(of: VecturaModelSource.self) { group in
+      for _ in 0..<8 {
+        group.addTask {
+          try await SwiftEmbedder.resolveModelSourceForLoading(
+            source,
+            configuration: .init(cacheDirectory: nil),
+            downloader: { modelId, cacheDirectory in
+              #expect(cacheDirectory == SwiftEmbedder.defaultModelCacheDirectory)
+              return try await probe.download(modelId: modelId, cacheDirectory: cacheDirectory)
             }
           )
         }
