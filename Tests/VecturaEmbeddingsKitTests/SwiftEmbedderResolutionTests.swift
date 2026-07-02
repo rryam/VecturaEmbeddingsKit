@@ -121,6 +121,60 @@ struct SwiftEmbedderResolutionTests {
     }
   }
 
+  @Test("Cancelled waiter does not clear in-flight download")
+  func cancelledWaiterDoesNotClearInFlightDownload() async throws {
+    let cacheDirectory = URL(filePath: "/tmp/vectura-cache-\(UUID().uuidString)")
+    let downloadedFolder = cacheDirectory
+      .appending(path: "models--minishlab--potion-base-4M")
+      .appending(path: "snapshots")
+      .appending(path: "abcdef1234567890")
+    let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .model2vec)
+    let probe = ControlledDownloadProbe(downloadedFolder: downloadedFolder)
+
+    let firstResolution = Task {
+      try await SwiftEmbedder.resolveModelSourceForLoading(
+        source,
+        configuration: .init(cacheDirectory: cacheDirectory),
+        downloader: { modelId, cacheDirectory in
+          try await probe.download(modelId: modelId, cacheDirectory: cacheDirectory)
+        }
+      )
+    }
+
+    while await probe.downloadCount == 0 {
+      try await Task.sleep(nanoseconds: 5_000_000)
+    }
+
+    firstResolution.cancel()
+    try await Task.sleep(nanoseconds: 20_000_000)
+
+    let secondResolution = Task {
+      try await SwiftEmbedder.resolveModelSourceForLoading(
+        source,
+        configuration: .init(cacheDirectory: cacheDirectory),
+        downloader: { modelId, cacheDirectory in
+          try await probe.download(modelId: modelId, cacheDirectory: cacheDirectory)
+        }
+      )
+    }
+
+    try await Task.sleep(nanoseconds: 20_000_000)
+    let downloadCount = await probe.downloadCount
+    #expect(downloadCount == 1)
+
+    await probe.release()
+    let resolvedSource = try await secondResolution.value
+    _ = try? await firstResolution.value
+
+    switch resolvedSource {
+    case .folder(let url, let type):
+      #expect(url == downloadedFolder)
+      #expect(type == .model2vec)
+    case .id:
+      Issue.record("Expected downloaded ID source to resolve to a folder source")
+    }
+  }
+
   @Test("Explicit model type overrides heuristics")
   func explicitModelTypeOverridesHeuristics() {
     let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .bert)
@@ -266,6 +320,33 @@ private actor DownloadProbe {
     #expect(modelId == "minishlab/potion-base-4M")
     calls += 1
     try await Task.sleep(nanoseconds: 50_000_000)
+    return downloadedFolder
+  }
+}
+
+private actor ControlledDownloadProbe {
+  let downloadedFolder: URL
+  private var calls = 0
+  private var isReleased = false
+
+  init(downloadedFolder: URL) {
+    self.downloadedFolder = downloadedFolder
+  }
+
+  var downloadCount: Int {
+    calls
+  }
+
+  func release() {
+    isReleased = true
+  }
+
+  func download(modelId: String, cacheDirectory: URL) async throws -> URL {
+    #expect(modelId == "minishlab/potion-base-4M")
+    calls += 1
+    while !isReleased {
+      try await Task.sleep(nanoseconds: 5_000_000)
+    }
     return downloadedFolder
   }
 }

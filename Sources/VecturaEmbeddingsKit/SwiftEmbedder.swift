@@ -437,14 +437,16 @@ private actor ModelDownloadCoordinator {
     }
     inFlightDownloads[key] = downloadTask
 
-    do {
-      let modelFolder = try await downloadTask.value
-      inFlightDownloads[key] = nil
-      return modelFolder
-    } catch {
-      inFlightDownloads[key] = nil
-      throw error
+    Task.detached { [downloadTask, key, self] in
+      _ = await downloadTask.result
+      await self.removeInFlightDownload(for: key)
     }
+
+    return try await downloadTask.value
+  }
+
+  private func removeInFlightDownload(for key: ModelDownloadKey) {
+    inFlightDownloads[key] = nil
   }
 }
 
