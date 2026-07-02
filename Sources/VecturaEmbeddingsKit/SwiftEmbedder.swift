@@ -53,6 +53,7 @@ public actor SwiftEmbedder {
   private var model2vecModel: Model2Vec.ModelBundle?
   private var staticEmbeddingsModel: StaticEmbeddings.ModelBundle?
   private var cachedDimension: Int?
+  private static let modelDownloadCoordinator = ModelDownloadCoordinator()
 
   /// Initializes a SwiftEmbedder with the specified model source.
   ///
@@ -365,7 +366,11 @@ extension SwiftEmbedder: VecturaEmbedder {
       return modelSource
     }
 
-    let modelFolder = try await downloader(modelId, cacheDirectory)
+    let modelFolder = try await modelDownloadCoordinator.download(
+      modelId: modelId,
+      cacheDirectory: cacheDirectory,
+      downloader: downloader
+    )
     return .folder(modelFolder, type: type ?? inferredModelType(for: modelSource))
   }
 
@@ -403,6 +408,45 @@ extension SwiftEmbedder: VecturaEmbedder {
         "*.txt",
       ]
     )
+  }
+}
+
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+private struct ModelDownloadKey: Hashable, Sendable {
+  var modelId: String
+  var cacheDirectory: URL
+}
+
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+private actor ModelDownloadCoordinator {
+  private var inFlightDownloads: [ModelDownloadKey: Task<URL, Error>] = [:]
+
+  func download(
+    modelId: String,
+    cacheDirectory: URL,
+    downloader: @escaping @Sendable (String, URL) async throws -> URL
+  ) async throws -> URL {
+    let key = ModelDownloadKey(modelId: modelId, cacheDirectory: cacheDirectory)
+
+    if let inFlightDownload = inFlightDownloads[key] {
+      return try await inFlightDownload.value
+    }
+
+    let downloadTask = Task {
+      try await downloader(modelId, cacheDirectory)
+    }
+    inFlightDownloads[key] = downloadTask
+
+    Task.detached { [downloadTask, key, self] in
+      _ = await downloadTask.result
+      await self.removeInFlightDownload(for: key)
+    }
+
+    return try await downloadTask.value
+  }
+
+  private func removeInFlightDownload(for key: ModelDownloadKey) {
+    inFlightDownloads[key] = nil
   }
 }
 

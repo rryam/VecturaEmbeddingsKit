@@ -36,16 +36,16 @@ struct SwiftEmbedderResolutionTests {
 
   @Test("ID source resolves to downloaded folder when cache directory is set")
   func idSourceResolvesToDownloadedFolderWithCacheDirectory() async throws {
-    let cacheDirectory = URL(filePath: "/tmp/vectura-cache")
-    let downloadedFolder = URL(filePath: "/tmp/vectura-cache/models--minishlab--potion-base-4M")
+    let cacheDirectory = URL(filePath: "/tmp/vectura-cache-\(UUID().uuidString)")
+    let downloadedFolder = cacheDirectory.appending(path: "models--minishlab--potion-base-4M")
     let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .model2vec)
 
     let resolved = try await SwiftEmbedder.resolveModelSourceForLoading(
       source,
       configuration: .init(cacheDirectory: cacheDirectory),
-      downloader: { modelId, cacheDirectory in
+      downloader: { modelId, requestedCacheDirectory in
         #expect(modelId == "minishlab/potion-base-4M")
-        #expect(cacheDirectory == URL(filePath: "/tmp/vectura-cache"))
+        #expect(requestedCacheDirectory == cacheDirectory)
         return downloadedFolder
       }
     )
@@ -61,7 +61,7 @@ struct SwiftEmbedderResolutionTests {
 
   @Test("Cached ID source preserves inferred model type")
   func cachedIDSourcePreservesInferredModelType() async throws {
-    let cacheDirectory = URL(filePath: "/tmp/vectura-cache")
+    let cacheDirectory = URL(filePath: "/tmp/vectura-cache-\(UUID().uuidString)")
     let downloadedFolder = cacheDirectory
       .appending(path: "models--minishlab--potion-base-4M")
       .appending(path: "snapshots")
@@ -75,6 +75,104 @@ struct SwiftEmbedderResolutionTests {
     )
 
     #expect(SwiftEmbedder.resolveModelFamily(for: resolved) == .model2vec)
+  }
+
+  @Test("Concurrent ID source resolutions share in-flight download")
+  func concurrentIDSourceResolutionsShareInFlightDownload() async throws {
+    let cacheDirectory = URL(filePath: "/tmp/vectura-cache-\(UUID().uuidString)")
+    let downloadedFolder = cacheDirectory
+      .appending(path: "models--minishlab--potion-base-4M")
+      .appending(path: "snapshots")
+      .appending(path: "abcdef1234567890")
+    let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .model2vec)
+    let probe = DownloadProbe(downloadedFolder: downloadedFolder)
+
+    let resolvedSources = try await withThrowingTaskGroup(of: VecturaModelSource.self) { group in
+      for _ in 0..<8 {
+        group.addTask {
+          try await SwiftEmbedder.resolveModelSourceForLoading(
+            source,
+            configuration: .init(cacheDirectory: cacheDirectory),
+            downloader: { modelId, cacheDirectory in
+              try await probe.download(modelId: modelId, cacheDirectory: cacheDirectory)
+            }
+          )
+        }
+      }
+
+      var resolvedSources: [VecturaModelSource] = []
+      for try await resolvedSource in group {
+        resolvedSources.append(resolvedSource)
+      }
+      return resolvedSources
+    }
+
+    let downloadCount = await probe.downloadCount
+    #expect(downloadCount == 1)
+    #expect(resolvedSources.count == 8)
+    for resolvedSource in resolvedSources {
+      switch resolvedSource {
+      case .folder(let url, let type):
+        #expect(url == downloadedFolder)
+        #expect(type == .model2vec)
+      case .id:
+        Issue.record("Expected downloaded ID source to resolve to a folder source")
+      }
+    }
+  }
+
+  @Test("Cancelled waiter does not clear in-flight download")
+  func cancelledWaiterDoesNotClearInFlightDownload() async throws {
+    let cacheDirectory = URL(filePath: "/tmp/vectura-cache-\(UUID().uuidString)")
+    let downloadedFolder = cacheDirectory
+      .appending(path: "models--minishlab--potion-base-4M")
+      .appending(path: "snapshots")
+      .appending(path: "abcdef1234567890")
+    let source = VecturaModelSource.id("minishlab/potion-base-4M", type: .model2vec)
+    let probe = ControlledDownloadProbe(downloadedFolder: downloadedFolder)
+
+    let firstResolution = Task {
+      try await SwiftEmbedder.resolveModelSourceForLoading(
+        source,
+        configuration: .init(cacheDirectory: cacheDirectory),
+        downloader: { modelId, cacheDirectory in
+          try await probe.download(modelId: modelId, cacheDirectory: cacheDirectory)
+        }
+      )
+    }
+
+    while await probe.downloadCount == 0 {
+      try await Task.sleep(nanoseconds: 5_000_000)
+    }
+
+    firstResolution.cancel()
+    try await Task.sleep(nanoseconds: 20_000_000)
+
+    let secondResolution = Task {
+      try await SwiftEmbedder.resolveModelSourceForLoading(
+        source,
+        configuration: .init(cacheDirectory: cacheDirectory),
+        downloader: { modelId, cacheDirectory in
+          try await probe.download(modelId: modelId, cacheDirectory: cacheDirectory)
+        }
+      )
+    }
+
+    try await Task.sleep(nanoseconds: 20_000_000)
+    let downloadCount = await probe.downloadCount
+    #expect(downloadCount == 1)
+
+    await probe.release()
+    let resolvedSource = try await secondResolution.value
+    _ = try? await firstResolution.value
+
+    switch resolvedSource {
+    case .folder(let url, let type):
+      #expect(url == downloadedFolder)
+      #expect(type == .model2vec)
+    case .id:
+      Issue.record("Expected downloaded ID source to resolve to a folder source")
+    }
   }
 
   @Test("Explicit model type overrides heuristics")
@@ -203,5 +301,52 @@ struct SwiftEmbedderResolutionTests {
         truncateDimension: 0
       )
     }
+  }
+}
+
+private actor DownloadProbe {
+  let downloadedFolder: URL
+  private var calls = 0
+
+  init(downloadedFolder: URL) {
+    self.downloadedFolder = downloadedFolder
+  }
+
+  var downloadCount: Int {
+    calls
+  }
+
+  func download(modelId: String, cacheDirectory: URL) async throws -> URL {
+    #expect(modelId == "minishlab/potion-base-4M")
+    calls += 1
+    try await Task.sleep(nanoseconds: 50_000_000)
+    return downloadedFolder
+  }
+}
+
+private actor ControlledDownloadProbe {
+  let downloadedFolder: URL
+  private var calls = 0
+  private var isReleased = false
+
+  init(downloadedFolder: URL) {
+    self.downloadedFolder = downloadedFolder
+  }
+
+  var downloadCount: Int {
+    calls
+  }
+
+  func release() {
+    isReleased = true
+  }
+
+  func download(modelId: String, cacheDirectory: URL) async throws -> URL {
+    #expect(modelId == "minishlab/potion-base-4M")
+    calls += 1
+    while !isReleased {
+      try await Task.sleep(nanoseconds: 5_000_000)
+    }
+    return downloadedFolder
   }
 }
